@@ -1,0 +1,29 @@
+# Keil MDK build output and per-user settings
+MDK-ARM/warehouse_people_number/
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.lst
+
+# IAR build output and per-user settings
+EWARM/Debug/
+EWARM/Release/
+EWARM/settings/
+
+# Generic embedded build artifacts
+*.o
+*.d
+*.crf
+*.axf
+*.elf
+*.map
+*.hex
+*.bin
+*.dep
+*.build_log.htm
+
+# Editor and operating-system files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.bak
+*.tmp
