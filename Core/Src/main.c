@@ -65,19 +65,19 @@ typedef struct
 #define SENSOR_OUT                 1U
 #define SENSOR_ECHO_READY_FLAG     0x00000001U
 #define DISTANCE_MIN_CM            2.0f
-#define DISTANCE_THRESHOLD_CM      20.0f
+#define DISTANCE_THRESHOLD_CM      10.0f
 #define SENSOR_SAMPLE_PERIOD_MS    120U
 #define SENSOR_RELEASE_SAMPLES     2U
 #define EVENT_COOLDOWN_MS          600U
 
 /* Change these values before the first programming if another start time is needed. */
 #define RTC_SET_YEAR               2026U
-#define RTC_SET_MONTH              7U
-#define RTC_SET_DATE               31U
+#define RTC_SET_MONTH              8U
+#define RTC_SET_DATE               1U
 #define RTC_SET_HOUR               22U
 #define RTC_SET_MINUTE             0U
 #define RTC_SET_SECOND             0U
-#define RTC_SET_WEEKDAY            RTC_WEEKDAY_FRIDAY
+#define RTC_SET_WEEKDAY            RTC_WEEKDAY_TUESDAY
 #define RTC_BKP_MAGIC              0xA55AU
 
 #define LOG_BUFFER_LENGTH          16U
@@ -827,6 +827,7 @@ static void Display_Refresh(void)
 {
   char people_line[12] = "People: 0/5";
   char time_line[9];
+  char date_line[11];
   int32_t people;
   RtcSnapshot_t rtc;
 
@@ -850,6 +851,17 @@ static void Display_Refresh(void)
   (void)Text_AppendTwoDigits(&time_line[6], rtc.second);
   time_line[8] = '\0';
   OLED_ShowString2x(18U, 30U, time_line);
+
+  date_line[0] = '2';
+  date_line[1] = '0';
+  (void)Text_AppendTwoDigits(&date_line[2], rtc.year);
+  date_line[4] = '/';
+  (void)Text_AppendTwoDigits(&date_line[5], rtc.month);
+  date_line[7] = '/';
+  (void)Text_AppendTwoDigits(&date_line[8], rtc.date);
+  date_line[10] = '\0';
+  OLED_ShowString(0U, 7U, date_line);
+
   OLED_Refresh();
 }
 
