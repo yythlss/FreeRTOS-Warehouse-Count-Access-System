@@ -50,12 +50,13 @@ typedef struct
   uint8_t hour;
   uint8_t minute;
   uint8_t second;
+  uint8_t weekday;
 } RtcSnapshot_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_PEOPLE                 5
+#define MAX_PEOPLE                 6
 
 #define EVENT_IN                   1U
 #define EVENT_OUT                  2U
@@ -75,10 +76,13 @@ typedef struct
 #define RTC_SET_MONTH              8U
 #define RTC_SET_DATE               1U
 #define RTC_SET_HOUR               11U
-#define RTC_SET_MINUTE             46U
+#define RTC_SET_MINUTE             50U
 #define RTC_SET_SECOND             0U
 #define RTC_SET_WEEKDAY            RTC_WEEKDAY_SATURDAY
-#define RTC_BKP_MAGIC              0xA55AU
+/* Change this value after editing RTC_SET_* to apply the new time once. */
+#define RTC_BKP_MAGIC              0xA55BU
+#define RTC_BKP_DATE_REGISTER      RTC_BKP_DR2
+#define RTC_BKP_WEEKDAY_REGISTER   RTC_BKP_DR3
 
 #define LOG_BUFFER_LENGTH          16U
 #define TF_RETRY_PERIOD_MS         5000U
@@ -168,7 +172,8 @@ static RtcSnapshot_t rtc_snapshot = {
   (uint8_t)RTC_SET_DATE,
   (uint8_t)RTC_SET_HOUR,
   (uint8_t)RTC_SET_MINUTE,
-  (uint8_t)RTC_SET_SECOND
+  (uint8_t)RTC_SET_SECOND,
+  (uint8_t)RTC_SET_WEEKDAY
 };
 static volatile uint32_t rtc_fat_timestamp = 0U;
 
@@ -195,9 +200,12 @@ void StartTFCardTask(void *argument);
 
 /* USER CODE BEGIN PFP */
 static void RTC_SetUserTime(void);
+static void RTC_SaveDateToBackup(const RTC_DateTypeDef *date);
+static uint8_t RTC_RestoreDateFromBackup(void);
 static void RTC_UpdateCachedTime(void);
 static void RTC_GetCachedTime(RtcSnapshot_t *snapshot);
 static uint32_t RTC_PackFatTime(const RtcSnapshot_t *snapshot);
+static const char *RTC_GetWeekdayText(uint8_t weekday);
 #if TF_CARD_ENABLED != 0U
 static void LogBuffer_Push(const LogItem_t *item);
 static uint8_t LogBuffer_Pop(LogItem_t *item);
@@ -240,6 +248,46 @@ static uint32_t RTC_PackFatTime(const RtcSnapshot_t *snapshot)
        | ((uint32_t)snapshot->second >> 1);
 }
 
+static void RTC_SaveDateToBackup(const RTC_DateTypeDef *date)
+{
+  uint32_t packed_date = ((uint32_t)date->Year << 9)
+                       | ((uint32_t)date->Month << 5)
+                       | (uint32_t)date->Date;
+
+  if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DATE_REGISTER) != packed_date)
+  {
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DATE_REGISTER, packed_date);
+  }
+  if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_WEEKDAY_REGISTER) != date->WeekDay)
+  {
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_WEEKDAY_REGISTER, date->WeekDay);
+  }
+}
+
+static uint8_t RTC_RestoreDateFromBackup(void)
+{
+  uint32_t packed_date = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DATE_REGISTER);
+  uint8_t year = (uint8_t)((packed_date >> 9) & 0x7FU);
+  uint8_t month = (uint8_t)((packed_date >> 5) & 0x0FU);
+  uint8_t date = (uint8_t)(packed_date & 0x1FU);
+  uint8_t weekday = (uint8_t)HAL_RTCEx_BKUPRead(&hrtc,
+                                                RTC_BKP_WEEKDAY_REGISTER);
+
+  if ((year > 99U) || (month < 1U) || (month > 12U) ||
+      (date < 1U) || (date > 31U) ||
+      (weekday < RTC_WEEKDAY_MONDAY) ||
+      (weekday > RTC_WEEKDAY_SUNDAY))
+  {
+    return 0U;
+  }
+
+  hrtc.DateToUpdate.Year = year;
+  hrtc.DateToUpdate.Month = month;
+  hrtc.DateToUpdate.Date = date;
+  hrtc.DateToUpdate.WeekDay = weekday;
+  return 1U;
+}
+
 static void RTC_SetUserTime(void)
 {
   RTC_TimeTypeDef time = {0};
@@ -263,6 +311,7 @@ static void RTC_SetUserTime(void)
     Error_Handler();
   }
 
+  RTC_SaveDateToBackup(&date);
   HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, RTC_BKP_MAGIC);
 }
 
@@ -288,6 +337,9 @@ static void RTC_UpdateCachedTime(void)
   next.hour = time.Hours;
   next.minute = time.Minutes;
   next.second = time.Seconds;
+  next.weekday = date.WeekDay;
+
+  RTC_SaveDateToBackup(&date);
 
   taskENTER_CRITICAL();
   rtc_snapshot = next;
@@ -300,6 +352,21 @@ static void RTC_GetCachedTime(RtcSnapshot_t *snapshot)
   taskENTER_CRITICAL();
   *snapshot = rtc_snapshot;
   taskEXIT_CRITICAL();
+}
+
+static const char *RTC_GetWeekdayText(uint8_t weekday)
+{
+  switch (weekday)
+  {
+    case RTC_WEEKDAY_MONDAY:    return "MON";
+    case RTC_WEEKDAY_TUESDAY:   return "TUE";
+    case RTC_WEEKDAY_WEDNESDAY: return "WED";
+    case RTC_WEEKDAY_THURSDAY:  return "THU";
+    case RTC_WEEKDAY_FRIDAY:    return "FRI";
+    case RTC_WEEKDAY_SATURDAY:  return "SAT";
+    case RTC_WEEKDAY_SUNDAY:    return "SUN";
+    default:                    return "---";
+  }
 }
 
 uint32_t App_GetFatTimestamp(void)
@@ -630,7 +697,8 @@ static void MX_RTC_Init(void)
   }
 
   /* USER CODE BEGIN Check_RTC_BKUP */
-  if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) != RTC_BKP_MAGIC)
+  if ((HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) != RTC_BKP_MAGIC) ||
+      (RTC_RestoreDateFromBackup() == 0U))
   {
 /* USER CODE END Check_RTC_BKUP */
 
@@ -861,6 +929,7 @@ static void Display_Refresh(void)
   (void)Text_AppendTwoDigits(&date_line[8], rtc.date);
   date_line[10] = '\0';
   OLED_ShowString(0U, 7U, date_line);
+  OLED_ShowString(110U, 7U, RTC_GetWeekdayText(rtc.weekday));
 
   OLED_Refresh();
 }

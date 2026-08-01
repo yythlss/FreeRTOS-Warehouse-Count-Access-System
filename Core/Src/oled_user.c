@@ -25,6 +25,20 @@ static const uint8_t glyph_9[5] = {0x06U, 0x49U, 0x49U, 0x29U, 0x1EU};
 static const uint8_t glyph_colon[5] = {0x00U, 0x36U, 0x36U, 0x00U, 0x00U};
 static const uint8_t glyph_slash[5] = {0x20U, 0x10U, 0x08U, 0x04U, 0x02U};
 static const uint8_t glyph_P[5] = {0x7FU, 0x09U, 0x09U, 0x09U, 0x06U};
+static const uint8_t glyph_A[5] = {0x7EU, 0x11U, 0x11U, 0x11U, 0x7EU};
+static const uint8_t glyph_D[5] = {0x7FU, 0x41U, 0x41U, 0x22U, 0x1CU};
+static const uint8_t glyph_E[5] = {0x7FU, 0x49U, 0x49U, 0x49U, 0x41U};
+static const uint8_t glyph_F[5] = {0x7FU, 0x09U, 0x09U, 0x09U, 0x01U};
+static const uint8_t glyph_H[5] = {0x7FU, 0x08U, 0x08U, 0x08U, 0x7FU};
+static const uint8_t glyph_I[5] = {0x00U, 0x41U, 0x7FU, 0x41U, 0x00U};
+static const uint8_t glyph_M[5] = {0x7FU, 0x02U, 0x0CU, 0x02U, 0x7FU};
+static const uint8_t glyph_N[5] = {0x7FU, 0x04U, 0x08U, 0x10U, 0x7FU};
+static const uint8_t glyph_O[5] = {0x3EU, 0x41U, 0x41U, 0x41U, 0x3EU};
+static const uint8_t glyph_R[5] = {0x7FU, 0x09U, 0x19U, 0x29U, 0x46U};
+static const uint8_t glyph_S[5] = {0x46U, 0x49U, 0x49U, 0x49U, 0x31U};
+static const uint8_t glyph_T[5] = {0x01U, 0x01U, 0x7FU, 0x01U, 0x01U};
+static const uint8_t glyph_U[5] = {0x3FU, 0x40U, 0x40U, 0x40U, 0x3FU};
+static const uint8_t glyph_W[5] = {0x7FU, 0x20U, 0x18U, 0x20U, 0x7FU};
 static const uint8_t glyph_e[5] = {0x38U, 0x54U, 0x54U, 0x54U, 0x18U};
 static const uint8_t glyph_l[5] = {0x00U, 0x41U, 0x7FU, 0x40U, 0x00U};
 static const uint8_t glyph_o[5] = {0x38U, 0x44U, 0x44U, 0x44U, 0x38U};
@@ -47,6 +61,20 @@ static const uint8_t *OLED_GetGlyph(char character)
     case ':': return glyph_colon;
     case '/': return glyph_slash;
     case 'P': return glyph_P;
+    case 'A': return glyph_A;
+    case 'D': return glyph_D;
+    case 'E': return glyph_E;
+    case 'F': return glyph_F;
+    case 'H': return glyph_H;
+    case 'I': return glyph_I;
+    case 'M': return glyph_M;
+    case 'N': return glyph_N;
+    case 'O': return glyph_O;
+    case 'R': return glyph_R;
+    case 'S': return glyph_S;
+    case 'T': return glyph_T;
+    case 'U': return glyph_U;
+    case 'W': return glyph_W;
     case 'e': return glyph_e;
     case 'l': return glyph_l;
     case 'o': return glyph_o;
@@ -154,7 +182,7 @@ void OLED_Clear(void)
 
 void OLED_ShowString(uint8_t x, uint8_t page, const char *text)
 {
-  while ((*text != '\0') && (page < 8U) && (x < 122U))
+  while ((*text != '\0') && (page < 8U) && (x <= 122U))
   {
     uint8_t index;
     const uint8_t *glyph = OLED_GetGlyph(*text);
