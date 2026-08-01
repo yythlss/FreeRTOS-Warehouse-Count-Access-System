@@ -6,6 +6,7 @@ extern I2C_HandleTypeDef hi2c2;
 
 #define OLED_ADDRESS_0  (0x3CU << 1)
 #define OLED_ADDRESS_1  (0x3DU << 1)
+#define OLED_COLUMN_OFFSET  2U
 
 static uint8_t oled_gram[128U * 8U];
 static uint8_t oled_ready = 0U;
@@ -148,8 +149,8 @@ void OLED_Init(void)
   OLED_WriteCommand(0x02U);
   OLED_WriteCommand(0xB0U);
   OLED_WriteCommand(0xC8U);
-  OLED_WriteCommand(0x00U);
-  OLED_WriteCommand(0x10U);
+  OLED_WriteCommand((uint8_t)(0x00U | (OLED_COLUMN_OFFSET & 0x0FU)));
+  OLED_WriteCommand((uint8_t)(0x10U | (OLED_COLUMN_OFFSET >> 4U)));
   OLED_WriteCommand(0x40U);
   OLED_WriteCommand(0x81U);
   OLED_WriteCommand(0x7FU);
@@ -239,8 +240,8 @@ void OLED_Refresh(void)
   for (page = 0U; page < 8U; page++)
   {
     OLED_WriteCommand((uint8_t)(0xB0U + page));
-    OLED_WriteCommand(0x00U);
-    OLED_WriteCommand(0x10U);
+    OLED_WriteCommand((uint8_t)(0x00U | (OLED_COLUMN_OFFSET & 0x0FU)));
+    OLED_WriteCommand((uint8_t)(0x10U | (OLED_COLUMN_OFFSET >> 4U)));
     OLED_WriteData(&oled_gram[(uint16_t)page * 128U], 128U);
   }
 }

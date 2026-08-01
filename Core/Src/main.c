@@ -929,7 +929,7 @@ static void Display_Refresh(void)
   (void)Text_AppendTwoDigits(&date_line[8], rtc.date);
   date_line[10] = '\0';
   OLED_ShowString(0U, 7U, date_line);
-  OLED_ShowString(60U, 7U, RTC_GetWeekdayText(rtc.weekday));
+  OLED_ShowString(72U, 7U, RTC_GetWeekdayText(rtc.weekday));
 
   OLED_Refresh();
 }
