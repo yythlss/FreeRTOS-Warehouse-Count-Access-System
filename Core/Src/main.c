@@ -74,10 +74,10 @@ typedef struct
 #define RTC_SET_YEAR               2026U
 #define RTC_SET_MONTH              8U
 #define RTC_SET_DATE               1U
-#define RTC_SET_HOUR               22U
-#define RTC_SET_MINUTE             0U
+#define RTC_SET_HOUR               11U
+#define RTC_SET_MINUTE             46U
 #define RTC_SET_SECOND             0U
-#define RTC_SET_WEEKDAY            RTC_WEEKDAY_TUESDAY
+#define RTC_SET_WEEKDAY            RTC_WEEKDAY_SATURDAY
 #define RTC_BKP_MAGIC              0xA55AU
 
 #define LOG_BUFFER_LENGTH          16U
