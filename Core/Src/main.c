@@ -75,12 +75,12 @@ typedef struct
 #define RTC_SET_YEAR               2026U
 #define RTC_SET_MONTH              8U
 #define RTC_SET_DATE               1U
-#define RTC_SET_HOUR               11U
-#define RTC_SET_MINUTE             50U
+#define RTC_SET_HOUR               12U
+#define RTC_SET_MINUTE             03U
 #define RTC_SET_SECOND             0U
 #define RTC_SET_WEEKDAY            RTC_WEEKDAY_SATURDAY
 /* Change this value after editing RTC_SET_* to apply the new time once. */
-#define RTC_BKP_MAGIC              0xA55BU
+#define RTC_BKP_MAGIC              0xA55CU
 #define RTC_BKP_DATE_REGISTER      RTC_BKP_DR2
 #define RTC_BKP_WEEKDAY_REGISTER   RTC_BKP_DR3
 
@@ -929,7 +929,7 @@ static void Display_Refresh(void)
   (void)Text_AppendTwoDigits(&date_line[8], rtc.date);
   date_line[10] = '\0';
   OLED_ShowString(0U, 7U, date_line);
-  OLED_ShowString(72U, 7U, RTC_GetWeekdayText(rtc.weekday));
+  OLED_ShowString(66U, 7U, RTC_GetWeekdayText(rtc.weekday));
 
   OLED_Refresh();
 }
