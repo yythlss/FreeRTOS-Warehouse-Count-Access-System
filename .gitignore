@@ -1,6 +1,7 @@
 # Keil MDK build output and per-user settings
-MDK-ARM/warehouse_people_number/
+MDK-ARM/My_warehouse/
 MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvoptx
 MDK-ARM/*.lst
 
 # IAR build output and per-user settings

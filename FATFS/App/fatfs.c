@@ -17,7 +17,6 @@
   */
 /* USER CODE END Header */
 #include "fatfs.h"
-#include "main.h"
 
 uint8_t retUSER;    /* Return value for USER */
 char USERPath[4];   /* USER logical drive path */
@@ -25,7 +24,7 @@ FATFS USERFatFS;    /* File system object for USER logical drive */
 FIL USERFile;       /* File object for USER */
 
 /* USER CODE BEGIN Variables */
-extern RTC_HandleTypeDef hrtc;
+
 /* USER CODE END Variables */
 
 void MX_FATFS_Init(void)
@@ -46,17 +45,7 @@ void MX_FATFS_Init(void)
 DWORD get_fattime(void)
 {
   /* USER CODE BEGIN get_fattime */
-  RTC_TimeTypeDef t;
-  RTC_DateTypeDef d;
-  HAL_RTC_GetTime(&hrtc, &t, RTC_FORMAT_BIN);
-  HAL_RTC_GetDate(&hrtc, &d, RTC_FORMAT_BIN);
-
-  return ((DWORD)(d.Year + 2000 - 1980) << 25) |
-         ((DWORD)d.Month << 21) |
-         ((DWORD)d.Date << 16) |
-         ((DWORD)t.Hours << 11) |
-         ((DWORD)t.Minutes << 5) |
-         ((DWORD)t.Seconds / 2);
+  return (DWORD)App_GetFatTimestamp();
   /* USER CODE END get_fattime */
 }
 

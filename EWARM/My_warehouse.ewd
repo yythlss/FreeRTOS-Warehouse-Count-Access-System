@@ -2,7 +2,7 @@
 <project>
 	<fileVersion>3</fileVersion>
 	<configuration>
-		<name>warehouse_people_number</name>
+		<name>My_warehouse</name>
 		<toolchain>
 			<name>ARM</name>
 		</toolchain>

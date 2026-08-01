@@ -3,8 +3,8 @@
  * Auto generated Run-Time-Environment Configuration File
  *      *** Do not modify ! ***
  *
- * Project: 'warehouse_people_number' 
- * Target:  'warehouse_people_number' 
+ * Project: 'My_warehouse' 
+ * Target:  'My_warehouse' 
  */
 
 #ifndef RTE_COMPONENTS_H

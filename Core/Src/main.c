@@ -23,12 +23,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include <stdio.h>
 #include <string.h>
 #include "task.h"
-#include "queue.h"
 #include "oled_user.h"
-/* USER CODE END Includes */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -36,45 +33,62 @@
 typedef struct
 {
   uint8_t event;
-  int people;
-  uint8_t year, month, date;
-  uint8_t hour, min, sec;
+  int32_t people;
+  uint8_t year;
+  uint8_t month;
+  uint8_t date;
+  uint8_t hour;
+  uint8_t minute;
+  uint8_t second;
 } LogItem_t;
+
+typedef struct
+{
+  uint8_t year;
+  uint8_t month;
+  uint8_t date;
+  uint8_t hour;
+  uint8_t minute;
+  uint8_t second;
+} RtcSnapshot_t;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_PEOPLE          5
-#define EVENT_IN            1U
-#define EVENT_OUT           2U
-#define EVENT_DENIED        3U
-#define SENSOR_IN           0U
-#define SENSOR_OUT          1U
-#define DISTANCE_THRESHOLD  20.0f     //超声波距离20cm
-#define DEBOUNCE_MS         1000U
+#define MAX_PEOPLE                 5
 
-/* RTC 用户设定时间：烧录前在这里修改成你要显示的起始时间 */
-#define RTC_SET_YEAR        2026U
-#define RTC_SET_MONTH       6U
-#define RTC_SET_DATE        16U
-#define RTC_SET_HOUR        16U
-#define RTC_SET_MINUTE      48U
-#define RTC_SET_SECOND      0U
-#define RTC_SET_WEEKDAY     RTC_WEEKDAY_TUESDAY
+#define EVENT_IN                   1U
+#define EVENT_OUT                  2U
+#define EVENT_DENIED               3U
 
-/*
- * 1：每次上电/复位都把 RTC 重新设置为上面的时间，适合你现在调试和演示前校准。
- * 0：只有备份寄存器无效时才设置 RTC，适合接了 VBAT 电池后长期走时。
- */
-#define RTC_FORCE_SET_ON_BOOT  1U
-#define RTC_BKP_MAGIC          0xA55AU
+#define SENSOR_IN                  0U
+#define SENSOR_OUT                 1U
+#define SENSOR_ECHO_READY_FLAG     0x00000001U
+#define DISTANCE_MIN_CM            2.0f
+#define DISTANCE_THRESHOLD_CM      20.0f
+#define SENSOR_SAMPLE_PERIOD_MS    120U
+#define SENSOR_RELEASE_SAMPLES     2U
+#define EVENT_COOLDOWN_MS          600U
 
-#define LED_ON()      HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET)
-#define LED_OFF()     HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET)
+/* Change these values before the first programming if another start time is needed. */
+#define RTC_SET_YEAR               2026U
+#define RTC_SET_MONTH              7U
+#define RTC_SET_DATE               31U
+#define RTC_SET_HOUR               22U
+#define RTC_SET_MINUTE             0U
+#define RTC_SET_SECOND             0U
+#define RTC_SET_WEEKDAY            RTC_WEEKDAY_FRIDAY
+#define RTC_BKP_MAGIC              0xA55AU
 
-#define BEEP_ON()     HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_SET)
-#define BEEP_OFF()    HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET)
+#define LOG_BUFFER_LENGTH          16U
+#define TF_RETRY_PERIOD_MS         5000U
+/* Keep this at 0 until the TF module is connected. Change it to 1 to enable logging. */
+#define TF_CARD_ENABLED            0U
 
+#define LED_ON()    HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET)
+#define LED_OFF()   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET)
+#define BEEP_ON()   HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_SET)
+#define BEEP_OFF()  HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -83,7 +97,7 @@ typedef struct
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-I2C_HandleTypeDef hi2c1;
+I2C_HandleTypeDef hi2c2;
 
 RTC_HandleTypeDef hrtc;
 
@@ -91,73 +105,160 @@ SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim3;
 
-osThreadId InSensorTaskHandle;
-osThreadId OutSensorTaskHandle;
-osThreadId PeopleDisplayTaHandle;
-osThreadId RTCTaskHandle;
-osThreadId TFCardTaskHandle;
-osMessageQId EventQueueHandle;
-osMutexId peopleMutexHandle;
+/* Definitions for InSensorTask */
+osThreadId_t InSensorTaskHandle;
+const osThreadAttr_t InSensorTask_attributes = {
+  .name = "InSensorTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for OutSensorTask */
+osThreadId_t OutSensorTaskHandle;
+const osThreadAttr_t OutSensorTask_attributes = {
+  .name = "OutSensorTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityAboveNormal,
+};
+/* Definitions for PeopleDisplayTa */
+osThreadId_t PeopleDisplayTaHandle;
+const osThreadAttr_t PeopleDisplayTa_attributes = {
+  .name = "PeopleDisplayTa",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityNormal,
+};
+/* Definitions for RTCTask */
+osThreadId_t RTCTaskHandle;
+const osThreadAttr_t RTCTask_attributes = {
+  .name = "RTCTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
+/* Definitions for TFCardTask */
+osThreadId_t TFCardTaskHandle;
+const osThreadAttr_t TFCardTask_attributes = {
+  .name = "TFCardTask",
+  .stack_size = 1024 * 4,
+  .priority = (osPriority_t) osPriorityBelowNormal,
+};
+/* Definitions for EventQueue */
+osMessageQueueId_t EventQueueHandle;
+const osMessageQueueAttr_t EventQueue_attributes = {
+  .name = "EventQueue"
+};
+/* Definitions for peopleMutex */
+osMutexId_t peopleMutexHandle;
+const osMutexAttr_t peopleMutex_attributes = {
+  .name = "peopleMutex"
+};
+/* Definitions for measureMutex */
+osMutexId_t measureMutexHandle;
+const osMutexAttr_t measureMutex_attributes = {
+  .name = "measureMutex"
+};
 /* USER CODE BEGIN PV */
-static int current_people = 0;
-static uint8_t rtc_year  = (uint8_t)(RTC_SET_YEAR - 2000U);
-static uint8_t rtc_month = (uint8_t)RTC_SET_MONTH;
-static uint8_t rtc_date  = (uint8_t)RTC_SET_DATE;
-static uint8_t rtc_hour  = (uint8_t)RTC_SET_HOUR;
-static uint8_t rtc_min   = (uint8_t)RTC_SET_MINUTE;
-static uint8_t rtc_sec   = (uint8_t)RTC_SET_SECOND;
+static int32_t current_people = 0;
 
-static osMutexId measureMutexHandle;
-static QueueHandle_t xLogQueue = NULL;
+static volatile uint8_t ic_state[2] = {0U, 0U};
+static volatile uint16_t ic_rise[2] = {0U, 0U};
+static volatile float distance_cm[2] = {-1.0f, -1.0f};
 
-static volatile uint8_t ic_state[2] = {0};
-static volatile uint16_t ic_rise[2] = {0};
-static volatile float distance_cm[2] = {0};
+static RtcSnapshot_t rtc_snapshot = {
+  (uint8_t)(RTC_SET_YEAR - 2000U),
+  (uint8_t)RTC_SET_MONTH,
+  (uint8_t)RTC_SET_DATE,
+  (uint8_t)RTC_SET_HOUR,
+  (uint8_t)RTC_SET_MINUTE,
+  (uint8_t)RTC_SET_SECOND
+};
+static volatile uint32_t rtc_fat_timestamp = 0U;
+
+#if TF_CARD_ENABLED != 0U
+static LogItem_t log_buffer[LOG_BUFFER_LENGTH];
+static uint8_t log_head = 0U;
+static uint8_t log_tail = 0U;
+static uint8_t log_count = 0U;
+#endif
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_I2C1_Init(void);
 static void MX_RTC_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM3_Init(void);
-void StartInSensorTask(void const * argument);
-void StartOutSensorTask(void const * argument);
-void StartPeopleDisplayTask(void const * argument);
-void StartRTCTask(void const * argument);
-void StartTFCardTask(void const * argument);
+static void MX_I2C2_Init(void);
+void StartInSensorTask(void *argument);
+void StartOutSensorTask(void *argument);
+void StartPeopleDisplayTask(void *argument);
+void StartRTCTask(void *argument);
+void StartTFCardTask(void *argument);
 
 /* USER CODE BEGIN PFP */
-static float HCSR04_ReadCm(uint8_t sensor);
-static void Buzzer_BeepShort(void);
-static void Display_Refresh(void);
-static void DoorLock_Update(void);
 static void RTC_SetUserTime(void);
 static void RTC_UpdateCachedTime(void);
+static void RTC_GetCachedTime(RtcSnapshot_t *snapshot);
+static uint32_t RTC_PackFatTime(const RtcSnapshot_t *snapshot);
+#if TF_CARD_ENABLED != 0U
+static void LogBuffer_Push(const LogItem_t *item);
+static uint8_t LogBuffer_Pop(LogItem_t *item);
+static char *Text_Append(char *destination, const char *source);
+static char *Text_AppendPeople(char *destination, int32_t people);
+static uint16_t FormatLogLine(char *line, const RtcSnapshot_t *rtc,
+                              const char *event_text, int32_t people);
+#endif
+static char *Text_AppendTwoDigits(char *destination, uint8_t value);
+static void Buzzer_BeepShort(void);
+static void DoorLock_Update(int32_t people);
+static void Display_Refresh(void);
+static void HCSR04_Trig(uint8_t sensor);
+static float HCSR04_ReadCm(uint8_t sensor);
+static void ProcessSensorSample(uint8_t sensor, uint32_t event,
+                                uint8_t *occupied, uint8_t *release_count,
+                                uint32_t *last_event_tick);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static uint32_t RTC_PackFatTime(const RtcSnapshot_t *snapshot)
+{
+  uint32_t full_year = 2000U + snapshot->year;
+
+  if (full_year < 1980U)
+  {
+    full_year = 1980U;
+  }
+  if (full_year > 2107U)
+  {
+    full_year = 2107U;
+  }
+
+  return ((full_year - 1980U) << 25)
+       | ((uint32_t)snapshot->month << 21)
+       | ((uint32_t)snapshot->date << 16)
+       | ((uint32_t)snapshot->hour << 11)
+       | ((uint32_t)snapshot->minute << 5)
+       | ((uint32_t)snapshot->second >> 1);
+}
+
 static void RTC_SetUserTime(void)
 {
-  RTC_TimeTypeDef sTime = {0};
-  RTC_DateTypeDef sDate = {0};
+  RTC_TimeTypeDef time = {0};
+  RTC_DateTypeDef date = {0};
 
-  sTime.Hours   = (uint8_t)RTC_SET_HOUR;
-  sTime.Minutes = (uint8_t)RTC_SET_MINUTE;
-  sTime.Seconds = (uint8_t)RTC_SET_SECOND;
+  time.Hours = (uint8_t)RTC_SET_HOUR;
+  time.Minutes = (uint8_t)RTC_SET_MINUTE;
+  time.Seconds = (uint8_t)RTC_SET_SECOND;
 
-  sDate.WeekDay = RTC_SET_WEEKDAY;
-  sDate.Year    = (uint8_t)(RTC_SET_YEAR - 2000U);
-  sDate.Month   = (uint8_t)RTC_SET_MONTH;
-  sDate.Date    = (uint8_t)RTC_SET_DATE;
+  date.WeekDay = RTC_SET_WEEKDAY;
+  date.Year = (uint8_t)(RTC_SET_YEAR - 2000U);
+  date.Month = (uint8_t)RTC_SET_MONTH;
+  date.Date = (uint8_t)RTC_SET_DATE;
 
-  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+  if (HAL_RTC_SetTime(&hrtc, &time, RTC_FORMAT_BIN) != HAL_OK)
   {
     Error_Handler();
   }
-  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
+  if (HAL_RTC_SetDate(&hrtc, &date, RTC_FORMAT_BIN) != HAL_OK)
   {
     Error_Handler();
   }
@@ -167,20 +268,140 @@ static void RTC_SetUserTime(void)
 
 static void RTC_UpdateCachedTime(void)
 {
-  RTC_TimeTypeDef t;
-  RTC_DateTypeDef d;
+  RTC_TimeTypeDef time = {0};
+  RTC_DateTypeDef date = {0};
+  RtcSnapshot_t next;
 
-  HAL_RTC_GetTime(&hrtc, &t, RTC_FORMAT_BIN);
-  /* STM32F1 读取 RTC 时间后必须再读取日期，时间寄存器才会正常释放/刷新 */
-  HAL_RTC_GetDate(&hrtc, &d, RTC_FORMAT_BIN);
+  if (HAL_RTC_GetTime(&hrtc, &time, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    return;
+  }
+  /* On STM32F1 the date must be read after the time to unlock the shadow registers. */
+  if (HAL_RTC_GetDate(&hrtc, &date, RTC_FORMAT_BIN) != HAL_OK)
+  {
+    return;
+  }
 
-  rtc_hour  = t.Hours;
-  rtc_min   = t.Minutes;
-  rtc_sec   = t.Seconds;
-  rtc_year  = d.Year;
-  rtc_month = d.Month;
-  rtc_date  = d.Date;
+  next.year = date.Year;
+  next.month = date.Month;
+  next.date = date.Date;
+  next.hour = time.Hours;
+  next.minute = time.Minutes;
+  next.second = time.Seconds;
+
+  taskENTER_CRITICAL();
+  rtc_snapshot = next;
+  rtc_fat_timestamp = RTC_PackFatTime(&next);
+  taskEXIT_CRITICAL();
 }
+
+static void RTC_GetCachedTime(RtcSnapshot_t *snapshot)
+{
+  taskENTER_CRITICAL();
+  *snapshot = rtc_snapshot;
+  taskEXIT_CRITICAL();
+}
+
+uint32_t App_GetFatTimestamp(void)
+{
+  return rtc_fat_timestamp;
+}
+
+#if TF_CARD_ENABLED != 0U
+static void LogBuffer_Push(const LogItem_t *item)
+{
+  taskENTER_CRITICAL();
+  if (log_count >= LOG_BUFFER_LENGTH)
+  {
+    log_tail = (uint8_t)((log_tail + 1U) % LOG_BUFFER_LENGTH);
+    log_count--;
+  }
+  log_buffer[log_head] = *item;
+  log_head = (uint8_t)((log_head + 1U) % LOG_BUFFER_LENGTH);
+  log_count++;
+  taskEXIT_CRITICAL();
+}
+
+static uint8_t LogBuffer_Pop(LogItem_t *item)
+{
+  uint8_t available = 0U;
+
+  taskENTER_CRITICAL();
+  if (log_count > 0U)
+  {
+    *item = log_buffer[log_tail];
+    log_tail = (uint8_t)((log_tail + 1U) % LOG_BUFFER_LENGTH);
+    log_count--;
+    available = 1U;
+  }
+  taskEXIT_CRITICAL();
+
+  return available;
+}
+
+static char *Text_Append(char *destination, const char *source)
+{
+  while (*source != '\0')
+  {
+    *destination++ = *source++;
+  }
+  return destination;
+}
+#endif
+
+static char *Text_AppendTwoDigits(char *destination, uint8_t value)
+{
+  *destination++ = (char)('0' + ((value / 10U) % 10U));
+  *destination++ = (char)('0' + (value % 10U));
+  return destination;
+}
+
+#if TF_CARD_ENABLED != 0U
+static char *Text_AppendPeople(char *destination, int32_t people)
+{
+  if (people < 0)
+  {
+    *destination++ = '-';
+    people = -people;
+  }
+
+  if (people >= 10)
+  {
+    *destination++ = (char)('0' + ((people / 10) % 10));
+  }
+  *destination++ = (char)('0' + (people % 10));
+  return destination;
+}
+
+static uint16_t FormatLogLine(char *line, const RtcSnapshot_t *rtc,
+                              const char *event_text, int32_t people)
+{
+  char *position = line;
+
+  *position++ = '2';
+  *position++ = '0';
+  position = Text_AppendTwoDigits(position, rtc->year);
+  *position++ = '-';
+  position = Text_AppendTwoDigits(position, rtc->month);
+  *position++ = '-';
+  position = Text_AppendTwoDigits(position, rtc->date);
+  *position++ = ' ';
+  position = Text_AppendTwoDigits(position, rtc->hour);
+  *position++ = ':';
+  position = Text_AppendTwoDigits(position, rtc->minute);
+  *position++ = ':';
+  position = Text_AppendTwoDigits(position, rtc->second);
+  *position++ = ',';
+  position = Text_Append(position, event_text);
+  *position++ = ',';
+  position = Text_AppendPeople(position, people);
+  *position++ = '\r';
+  *position++ = '\n';
+  *position = '\0';
+
+  return (uint16_t)(position - line);
+}
+#endif
 /* USER CODE END 0 */
 
 /**
@@ -212,30 +433,28 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_I2C1_Init();
   MX_RTC_Init();
   MX_SPI1_Init();
   MX_TIM3_Init();
+  MX_I2C2_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
-  HAL_GPIO_WritePin(TF_CS_GPIO_Port, TF_CS_Pin, GPIO_PIN_SET);
+  LED_OFF();
+  BEEP_OFF();
+  OLED_Init();
+/* USER CODE END 2 */
 
-/* 先把 LED 和蜂鸣器关掉 */
-	HAL_GPIO_WritePin(TF_CS_GPIO_Port, TF_CS_Pin, GPIO_PIN_SET);
-	LED_OFF();
-	BEEP_OFF();
-	OLED_Init();
-//  Display_Refresh();
-  /* USER CODE END 2 */
-
+  /* Init scheduler */
+  osKernelInitialize();
   /* Create the mutex(es) */
-  /* definition and creation of peopleMutex */
-  osMutexDef(peopleMutex);
-  peopleMutexHandle = osMutexCreate(osMutex(peopleMutex));
+  /* creation of peopleMutex */
+  peopleMutexHandle = osMutexNew(&peopleMutex_attributes);
+
+  /* creation of measureMutex */
+  measureMutexHandle = osMutexNew(&measureMutex_attributes);
 
   /* USER CODE BEGIN RTOS_MUTEX */
-  osMutexDef(measureMutex);
-  measureMutexHandle = osMutexCreate(osMutex(measureMutex));
+  /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
@@ -247,38 +466,42 @@ int main(void)
   /* USER CODE END RTOS_TIMERS */
 
   /* Create the queue(s) */
-  /* definition and creation of EventQueue */
-  osMessageQDef(EventQueue, 10, 4);
-  EventQueueHandle = osMessageCreate(osMessageQ(EventQueue), NULL);
+  /* creation of EventQueue */
+  EventQueueHandle = osMessageQueueNew (10, sizeof(uint32_t), &EventQueue_attributes);
 
   /* USER CODE BEGIN RTOS_QUEUES */
-  xLogQueue = xQueueCreate(20, sizeof(LogItem_t));
+  /* add queues, ... */
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* definition and creation of InSensorTask */
-  osThreadDef(InSensorTask, StartInSensorTask, osPriorityAboveNormal, 0, 256);
-  InSensorTaskHandle = osThreadCreate(osThread(InSensorTask), NULL);
+  /* creation of InSensorTask */
+  InSensorTaskHandle = osThreadNew(StartInSensorTask, NULL, &InSensorTask_attributes);
 
-  /* definition and creation of OutSensorTask */
-  osThreadDef(OutSensorTask, StartOutSensorTask, osPriorityAboveNormal, 0, 256);
-  OutSensorTaskHandle = osThreadCreate(osThread(OutSensorTask), NULL);
+  /* creation of OutSensorTask */
+  OutSensorTaskHandle = osThreadNew(StartOutSensorTask, NULL, &OutSensorTask_attributes);
 
-  /* definition and creation of PeopleDisplayTa */
-  osThreadDef(PeopleDisplayTa, StartPeopleDisplayTask, osPriorityNormal, 0, 256);
-  PeopleDisplayTaHandle = osThreadCreate(osThread(PeopleDisplayTa), NULL);
+  /* creation of PeopleDisplayTa */
+  PeopleDisplayTaHandle = osThreadNew(StartPeopleDisplayTask, NULL, &PeopleDisplayTa_attributes);
 
-  /* definition and creation of RTCTask */
-  osThreadDef(RTCTask, StartRTCTask, osPriorityLow, 0, 128);
-  RTCTaskHandle = osThreadCreate(osThread(RTCTask), NULL);
+  /* creation of RTCTask */
+  RTCTaskHandle = osThreadNew(StartRTCTask, NULL, &RTCTask_attributes);
 
-  /* definition and creation of TFCardTask */
-  osThreadDef(TFCardTask, StartTFCardTask, osPriorityBelowNormal, 0, 1024);
-  TFCardTaskHandle = osThreadCreate(osThread(TFCardTask), NULL);
+  /* creation of TFCardTask */
+  TFCardTaskHandle = osThreadNew(StartTFCardTask, NULL, &TFCardTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
-  /* add threads, ... */
+  if ((peopleMutexHandle == NULL) || (measureMutexHandle == NULL) ||
+      (EventQueueHandle == NULL) || (InSensorTaskHandle == NULL) ||
+      (OutSensorTaskHandle == NULL) || (PeopleDisplayTaHandle == NULL) ||
+      (RTCTaskHandle == NULL) || (TFCardTaskHandle == NULL))
+  {
+    Error_Handler();
+  }
   /* USER CODE END RTOS_THREADS */
+
+  /* USER CODE BEGIN RTOS_EVENTS */
+  /* add events, ... */
+  /* USER CODE END RTOS_EVENTS */
 
   /* Start scheduler */
   osKernelStart();
@@ -344,36 +567,36 @@ void SystemClock_Config(void)
 }
 
 /**
-  * @brief I2C1 Initialization Function
+  * @brief I2C2 Initialization Function
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void)
+static void MX_I2C2_Init(void)
 {
 
-  /* USER CODE BEGIN I2C1_Init 0 */
+  /* USER CODE BEGIN I2C2_Init 0 */
 
-  /* USER CODE END I2C1_Init 0 */
+  /* USER CODE END I2C2_Init 0 */
 
-  /* USER CODE BEGIN I2C1_Init 1 */
+  /* USER CODE BEGIN I2C2_Init 1 */
 
-  /* USER CODE END I2C1_Init 1 */
-  hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
-  hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
-  hi2c1.Init.OwnAddress1 = 0;
-  hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
-  hi2c1.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
-  hi2c1.Init.OwnAddress2 = 0;
-  hi2c1.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
-  hi2c1.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
-  if (HAL_I2C_Init(&hi2c1) != HAL_OK)
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
   {
     Error_Handler();
   }
-  /* USER CODE BEGIN I2C1_Init 2 */
+  /* USER CODE BEGIN I2C2_Init 2 */
 
-  /* USER CODE END I2C1_Init 2 */
+  /* USER CODE END I2C2_Init 2 */
 
 }
 
@@ -388,6 +611,9 @@ static void MX_RTC_Init(void)
   /* USER CODE BEGIN RTC_Init 0 */
 
   /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef DateToUpdate = {0};
 
   /* USER CODE BEGIN RTC_Init 1 */
 
@@ -404,20 +630,33 @@ static void MX_RTC_Init(void)
   }
 
   /* USER CODE BEGIN Check_RTC_BKUP */
-
-  /* USER CODE END Check_RTC_BKUP */
-
-  /* USER CODE BEGIN RTC_Init 2 */
-#if RTC_FORCE_SET_ON_BOOT
-  RTC_SetUserTime();
-#else
   if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) != RTC_BKP_MAGIC)
   {
+/* USER CODE END Check_RTC_BKUP */
+
+  /** Initialize RTC and set the Time and Date
+  */
+  sTime.Hours = 0x0;
+  sTime.Minutes = 0x0;
+  sTime.Seconds = 0x0;
+
+  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  DateToUpdate.WeekDay = RTC_WEEKDAY_MONDAY;
+  DateToUpdate.Month = RTC_MONTH_JANUARY;
+  DateToUpdate.Date = 0x1;
+  DateToUpdate.Year = 0x0;
+
+  if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BCD) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN RTC_Init 2 */
     RTC_SetUserTime();
   }
-#endif
-  RTC_UpdateCachedTime();
-  /* USER CODE END RTC_Init 2 */
+/* USER CODE END RTC_Init 2 */
 
 }
 
@@ -519,8 +758,9 @@ static void MX_TIM3_Init(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-/* USER CODE BEGIN MX_GPIO_Init_1 */
-/* USER CODE END MX_GPIO_Init_1 */
+  /* USER CODE BEGIN MX_GPIO_Init_1 */
+
+  /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
@@ -529,7 +769,10 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, LED_Pin|BEEP_Pin|TF_CS_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, LED_Pin|TF_CS_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(BEEP_GPIO_Port, BEEP_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOB, TR1_Pin|TR2_Pin, GPIO_PIN_RESET);
@@ -555,46 +798,58 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-/* USER CODE BEGIN MX_GPIO_Init_2 */
-/* USER CODE END MX_GPIO_Init_2 */
+  /* USER CODE BEGIN MX_GPIO_Init_2 */
+
+  /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
 static void Buzzer_BeepShort(void)
 {
   BEEP_ON();
-  osDelay(80);
+  osDelay(80U);
   BEEP_OFF();
 }
 
-static void DoorLock_Update(void)
+static void DoorLock_Update(int32_t people)
 {
-  if (current_people >= MAX_PEOPLE)
-	{ LED_ON();  }   // 人数满，门禁锁止，LED亮
+  if (people >= MAX_PEOPLE)
+  {
+    LED_ON();
+  }
   else
-  {  LED_OFF();  }  // 人数没满，LED灭
+  {
+    LED_OFF();
+  }
 }
 
 static void Display_Refresh(void)
 {
-  char line[24];
-  int people_copy;
+  char people_line[12] = "People: 0/5";
+  char time_line[9];
+  int32_t people;
+  RtcSnapshot_t rtc;
 
-  osMutexWait(peopleMutexHandle, osWaitForever);
-  people_copy = current_people;
-  osMutexRelease(peopleMutexHandle);
+  if (osMutexAcquire(peopleMutexHandle, osWaitForever) != osOK)
+  {
+    return;
+  }
+  people = current_people;
+  (void)osMutexRelease(peopleMutexHandle);
+  RTC_GetCachedTime(&rtc);
 
   OLED_Clear();
+  people_line[8] = (char)('0' + (people % 10));
+  people_line[10] = (char)('0' + MAX_PEOPLE);
+  OLED_ShowString(7U, 0U, people_line);
 
-
-
-	sprintf(line, "People: %d / Max: %d", people_copy, MAX_PEOPLE);
-	OLED_ShowString(10, 0, line);
-
-  /* Second line: time */
-  sprintf(line, "%02d:%02d:%02d", rtc_hour, rtc_min, rtc_sec);
-  OLED_ShowString2x(15, 30, line);
-
+  (void)Text_AppendTwoDigits(&time_line[0], rtc.hour);
+  time_line[2] = ':';
+  (void)Text_AppendTwoDigits(&time_line[3], rtc.minute);
+  time_line[5] = ':';
+  (void)Text_AppendTwoDigits(&time_line[6], rtc.second);
+  time_line[8] = '\0';
+  OLED_ShowString2x(16U, 30U, time_line);
   OLED_Refresh();
 }
 
@@ -602,12 +857,15 @@ static void HCSR04_Trig(uint8_t sensor)
 {
   GPIO_TypeDef *port = (sensor == SENSOR_IN) ? TR1_GPIO_Port : TR2_GPIO_Port;
   uint16_t pin = (sensor == SENSOR_IN) ? TR1_Pin : TR2_Pin;
+  volatile uint32_t delay_count;
 
   HAL_GPIO_WritePin(port, pin, GPIO_PIN_RESET);
   taskENTER_CRITICAL();
-  for (volatile uint32_t i = 0; i < 80; i++);
   HAL_GPIO_WritePin(port, pin, GPIO_PIN_SET);
-  for (volatile uint32_t i = 0; i < 900; i++); /* about 10 us at 72 MHz, rough delay */
+  for (delay_count = 0U; delay_count < 900U; delay_count++)
+  {
+    __NOP();
+  }
   HAL_GPIO_WritePin(port, pin, GPIO_PIN_RESET);
   taskEXIT_CRITICAL();
 }
@@ -615,66 +873,139 @@ static void HCSR04_Trig(uint8_t sensor)
 static float HCSR04_ReadCm(uint8_t sensor)
 {
   uint32_t channel = (sensor == SENSOR_IN) ? TIM_CHANNEL_1 : TIM_CHANNEL_2;
-  float ret = -1.0f;
+  uint32_t flags;
+  float result = -1.0f;
 
-  osMutexWait(measureMutexHandle, osWaitForever);
-
-  while (ulTaskNotifyTake(pdTRUE, 0) != 0) {}
-
-  ic_state[sensor] = 0;
-  distance_cm[sensor] = -1.0f;
-  __HAL_TIM_SET_COUNTER(&htim3, 0);
-  __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, channel, TIM_INPUTCHANNELPOLARITY_RISING);
-  HAL_TIM_IC_Start_IT(&htim3, channel);
-
-  HCSR04_Trig(sensor);
-
-  if (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(60)) > 0) {
-    ret = distance_cm[sensor];
+  if (osMutexAcquire(measureMutexHandle, osWaitForever) != osOK)
+  {
+    return -1.0f;
   }
 
-  HAL_TIM_IC_Stop_IT(&htim3, channel);
-  osMutexRelease(measureMutexHandle);
-  return ret;
+  (void)osThreadFlagsClear(SENSOR_ECHO_READY_FLAG);
+  ic_state[sensor] = 0U;
+  distance_cm[sensor] = -1.0f;
+  __HAL_TIM_SET_COUNTER(&htim3, 0U);
+  __HAL_TIM_SET_CAPTUREPOLARITY(&htim3, channel,
+                                TIM_INPUTCHANNELPOLARITY_RISING);
+
+  if (HAL_TIM_IC_Start_IT(&htim3, channel) == HAL_OK)
+  {
+    HCSR04_Trig(sensor);
+    flags = osThreadFlagsWait(SENSOR_ECHO_READY_FLAG, osFlagsWaitAny, 60U);
+    if ((flags & SENSOR_ECHO_READY_FLAG) != 0U)
+    {
+      result = distance_cm[sensor];
+    }
+    (void)HAL_TIM_IC_Stop_IT(&htim3, channel);
+  }
+
+  (void)osMutexRelease(measureMutexHandle);
+  return result;
+}
+
+static void ProcessSensorSample(uint8_t sensor, uint32_t event,
+                                uint8_t *occupied, uint8_t *release_count,
+                                uint32_t *last_event_tick)
+{
+  float distance = HCSR04_ReadCm(sensor);
+  uint32_t now = osKernelGetTickCount();
+  uint32_t cooldown_ticks = (EVENT_COOLDOWN_MS * osKernelGetTickFreq()) / 1000U;
+  uint8_t is_near = ((distance >= DISTANCE_MIN_CM) &&
+                     (distance < DISTANCE_THRESHOLD_CM)) ? 1U : 0U;
+
+  if (is_near != 0U)
+  {
+    *release_count = 0U;
+    if ((*occupied == 0U) && ((now - *last_event_tick) >= cooldown_ticks))
+    {
+      uint32_t event_to_send = event;
+
+      *occupied = 1U;
+      *last_event_tick = now;
+
+      if (event == EVENT_IN)
+      {
+        int32_t people;
+
+        if (osMutexAcquire(peopleMutexHandle, osWaitForever) != osOK)
+        {
+          return;
+        }
+        people = current_people;
+        (void)osMutexRelease(peopleMutexHandle);
+
+        if (people >= MAX_PEOPLE)
+        {
+          event_to_send = EVENT_DENIED;
+          DoorLock_Update(people);
+          Buzzer_BeepShort();
+        }
+      }
+
+      (void)osMessageQueuePut(EventQueueHandle, &event_to_send, 0U, 0U);
+    }
+  }
+  else if (*occupied != 0U)
+  {
+    (*release_count)++;
+    if (*release_count >= SENSOR_RELEASE_SAMPLES)
+    {
+      *occupied = 0U;
+      *release_count = 0U;
+    }
+  }
 }
 
 void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
 {
-  BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+  uint8_t sensor;
+  uint32_t channel;
+  osThreadId_t target_task;
+  uint16_t falling;
+  uint16_t difference;
 
-  if (htim->Instance != TIM3) return;
-
-  if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1) {
-    if (ic_state[SENSOR_IN] == 0) {
-      ic_rise[SENSOR_IN] = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
-      ic_state[SENSOR_IN] = 1;
-      __HAL_TIM_SET_CAPTUREPOLARITY(htim, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_FALLING);
-    } else {
-      uint16_t fall = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_1);
-      uint16_t diff = (fall >= ic_rise[SENSOR_IN]) ? (fall - ic_rise[SENSOR_IN]) : (65535 - ic_rise[SENSOR_IN] + fall + 1);
-      distance_cm[SENSOR_IN] = diff * 0.0343f / 2.0f;
-      ic_state[SENSOR_IN] = 0;
-      __HAL_TIM_SET_CAPTUREPOLARITY(htim, TIM_CHANNEL_1, TIM_INPUTCHANNELPOLARITY_RISING);
-      vTaskNotifyGiveFromISR((TaskHandle_t)InSensorTaskHandle, &xHigherPriorityTaskWoken);
-    }
+  if (htim->Instance != TIM3)
+  {
+    return;
   }
 
-  if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2) {
-    if (ic_state[SENSOR_OUT] == 0) {
-      ic_rise[SENSOR_OUT] = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
-      ic_state[SENSOR_OUT] = 1;
-      __HAL_TIM_SET_CAPTUREPOLARITY(htim, TIM_CHANNEL_2, TIM_INPUTCHANNELPOLARITY_FALLING);
-    } else {
-      uint16_t fall = HAL_TIM_ReadCapturedValue(htim, TIM_CHANNEL_2);
-      uint16_t diff = (fall >= ic_rise[SENSOR_OUT]) ? (fall - ic_rise[SENSOR_OUT]) : (65535 - ic_rise[SENSOR_OUT] + fall + 1);
-      distance_cm[SENSOR_OUT] = diff * 0.0343f / 2.0f;
-      ic_state[SENSOR_OUT] = 0;
-      __HAL_TIM_SET_CAPTUREPOLARITY(htim, TIM_CHANNEL_2, TIM_INPUTCHANNELPOLARITY_RISING);
-      vTaskNotifyGiveFromISR((TaskHandle_t)OutSensorTaskHandle, &xHigherPriorityTaskWoken);
-    }
+  if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_1)
+  {
+    sensor = SENSOR_IN;
+    channel = TIM_CHANNEL_1;
+    target_task = InSensorTaskHandle;
+  }
+  else if (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2)
+  {
+    sensor = SENSOR_OUT;
+    channel = TIM_CHANNEL_2;
+    target_task = OutSensorTaskHandle;
+  }
+  else
+  {
+    return;
   }
 
-  portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+  if (ic_state[sensor] == 0U)
+  {
+    ic_rise[sensor] = (uint16_t)HAL_TIM_ReadCapturedValue(htim, channel);
+    ic_state[sensor] = 1U;
+    __HAL_TIM_SET_CAPTUREPOLARITY(htim, channel,
+                                  TIM_INPUTCHANNELPOLARITY_FALLING);
+  }
+  else
+  {
+    falling = (uint16_t)HAL_TIM_ReadCapturedValue(htim, channel);
+    difference = (uint16_t)(falling - ic_rise[sensor]);
+    distance_cm[sensor] = ((float)difference * 0.0343f) / 2.0f;
+    ic_state[sensor] = 0U;
+    __HAL_TIM_SET_CAPTUREPOLARITY(htim, channel,
+                                  TIM_INPUTCHANNELPOLARITY_RISING);
+    if (target_task != NULL)
+    {
+      (void)osThreadFlagsSet(target_task, SENSOR_ECHO_READY_FLAG);
+    }
+  }
 }
 /* USER CODE END 4 */
 
@@ -685,29 +1016,19 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim)
   * @retval None
   */
 /* USER CODE END Header_StartInSensorTask */
-void StartInSensorTask(void const * argument)
+void StartInSensorTask(void *argument)
 {
   /* USER CODE BEGIN 5 */
-  uint32_t last_valid_tick = 0;
+  uint8_t occupied = 0U;
+  uint8_t release_count = 0U;
+  uint32_t last_event_tick = 0U;
+
+  /* Infinite loop */
   for(;;)
   {
-    float d = HCSR04_ReadCm(SENSOR_IN);
-    uint32_t now = osKernelSysTick();
-
-    if (d > 2.0f && d < DISTANCE_THRESHOLD && (now - last_valid_tick) >= DEBOUNCE_MS) {
-      last_valid_tick = now;
-
-      osMutexWait(peopleMutexHandle, osWaitForever);
-      if (current_people >= MAX_PEOPLE) {
-        DoorLock_Update();
-        osMutexRelease(peopleMutexHandle);
-        Buzzer_BeepShort();
-      } else {
-        osMutexRelease(peopleMutexHandle);
-        osMessagePut(EventQueueHandle, EVENT_IN, 0);
-      }
-    }
-    osDelay(120);
+    ProcessSensorSample(SENSOR_IN, EVENT_IN, &occupied,
+                        &release_count, &last_event_tick);
+    osDelay(SENSOR_SAMPLE_PERIOD_MS);
   }
   /* USER CODE END 5 */
 }
@@ -719,20 +1040,19 @@ void StartInSensorTask(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartOutSensorTask */
-void StartOutSensorTask(void const * argument)
+void StartOutSensorTask(void *argument)
 {
   /* USER CODE BEGIN StartOutSensorTask */
-  uint32_t last_valid_tick = 0;
+  uint8_t occupied = 0U;
+  uint8_t release_count = 0U;
+  uint32_t last_event_tick = 0U;
+
+  /* Infinite loop */
   for(;;)
   {
-    float d = HCSR04_ReadCm(SENSOR_OUT);
-    uint32_t now = osKernelSysTick();
-
-    if (d > 2.0f && d < DISTANCE_THRESHOLD && (now - last_valid_tick) >= DEBOUNCE_MS) {
-      last_valid_tick = now;
-      osMessagePut(EventQueueHandle, EVENT_OUT, 0);
-    }
-    osDelay(120);
+    ProcessSensorSample(SENSOR_OUT, EVENT_OUT, &occupied,
+                        &release_count, &last_event_tick);
+    osDelay(SENSOR_SAMPLE_PERIOD_MS);
   }
   /* USER CODE END StartOutSensorTask */
 }
@@ -744,38 +1064,51 @@ void StartOutSensorTask(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartPeopleDisplayTask */
-void StartPeopleDisplayTask(void const * argument)
+void StartPeopleDisplayTask(void *argument)
 {
   /* USER CODE BEGIN StartPeopleDisplayTask */
-  osEvent evt;
+  uint32_t event;
+#if TF_CARD_ENABLED != 0U
   LogItem_t log;
+#endif
 
+  /* Infinite loop */
   for(;;)
   {
-    evt = osMessageGet(EventQueueHandle, 200);
-    if (evt.status == osEventMessage) {
-      uint32_t type = evt.value.v;
-      int people_after;
+    if (osMessageQueueGet(EventQueueHandle, &event, NULL, 200U) == osOK)
+    {
+      int32_t people;
+#if TF_CARD_ENABLED != 0U
+      RtcSnapshot_t rtc;
+#endif
 
-      osMutexWait(peopleMutexHandle, osWaitForever);
-      if (type == EVENT_IN) {
-        if (current_people < MAX_PEOPLE) current_people++;
-      } else if (type == EVENT_OUT) {
-        if (current_people > 0) current_people--;
+      if (osMutexAcquire(peopleMutexHandle, osWaitForever) == osOK)
+      {
+        if ((event == EVENT_IN) && (current_people < MAX_PEOPLE))
+        {
+          current_people++;
+        }
+        else if ((event == EVENT_OUT) && (current_people > 0))
+        {
+          current_people--;
+        }
+        people = current_people;
+        DoorLock_Update(people);
+        (void)osMutexRelease(peopleMutexHandle);
+
+#if TF_CARD_ENABLED != 0U
+        RTC_GetCachedTime(&rtc);
+        log.event = (uint8_t)event;
+        log.people = people;
+        log.year = rtc.year;
+        log.month = rtc.month;
+        log.date = rtc.date;
+        log.hour = rtc.hour;
+        log.minute = rtc.minute;
+        log.second = rtc.second;
+        LogBuffer_Push(&log);
+#endif
       }
-      people_after = current_people;
-      DoorLock_Update();
-      osMutexRelease(peopleMutexHandle);
-
-      log.event = (uint8_t)type;
-      log.people = people_after;
-      log.year = rtc_year;
-      log.month = rtc_month;
-      log.date = rtc_date;
-      log.hour = rtc_hour;
-      log.min = rtc_min;
-      log.sec = rtc_sec;
-      if (xLogQueue != NULL) xQueueSend(xLogQueue, &log, 0);
     }
 
     Display_Refresh();
@@ -790,13 +1123,14 @@ void StartPeopleDisplayTask(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartRTCTask */
-void StartRTCTask(void const * argument)
+void StartRTCTask(void *argument)
 {
   /* USER CODE BEGIN StartRTCTask */
+  /* Infinite loop */
   for(;;)
   {
     RTC_UpdateCachedTime();
-    osDelay(1000);
+    osDelay(1000U);
   }
   /* USER CODE END StartRTCTask */
 }
@@ -808,78 +1142,140 @@ void StartRTCTask(void const * argument)
 * @retval None
 */
 /* USER CODE END Header_StartTFCardTask */
-void StartTFCardTask(void const * argument)
+void StartTFCardTask(void *argument)
 {
   /* USER CODE BEGIN StartTFCardTask */
-  FRESULT res;
-  UINT bw;
-  char line[128];
-
-  /* 等待 SPI、RTC、OLED 等外设和其他任务稳定 */
-  osDelay(1000);
-
-  /* 上电先尝试创建 boot.txt。只要 SD 卡能写，这个文件一定会出现，方便判断 SD 是否正常。 */
-  res = f_mount(&USERFatFS, USERPath, 1);
-  if (res == FR_OK)
+#if TF_CARD_ENABLED == 0U
+  for (;;)
   {
-    res = f_open(&USERFile, "boot.txt", FA_OPEN_ALWAYS | FA_WRITE);
-    if (res == FR_OK)
-    {
-      f_lseek(&USERFile, f_size(&USERFile));
-      sprintf(line, "System boot, SD OK, %02d:%02d:%02d\r\n", rtc_hour, rtc_min, rtc_sec);
-      f_write(&USERFile, line, strlen(line), &bw);
-      f_sync(&USERFile);
-      f_close(&USERFile);
-    }
+    osDelay(1000U);
   }
+#else
+  FRESULT result;
+  UINT bytes_written;
+  uint16_t line_length;
+  char line[128];
+  uint8_t boot_recorded = 0U;
 
+  osDelay(1500U);
+
+  /* Infinite loop */
   for(;;)
   {
-    LogItem_t item;
-    int people_copy;
-
-    /* 每 5 秒采集/保存一次当前人数和时间，即使没有进出事件也会写入。 */
-    osDelay(5000);
-    RTC_UpdateCachedTime();
-
-    res = f_mount(&USERFatFS, USERPath, 1);
-    if (res == FR_OK)
+    result = f_mount(&USERFatFS, USERPath, 1U);
+    if (result == FR_OK)
     {
-      res = f_open(&USERFile, "log.csv", FA_OPEN_ALWAYS | FA_WRITE);
-      if (res == FR_OK)
+      if (boot_recorded == 0U)
       {
-        f_lseek(&USERFile, f_size(&USERFile));
+        RtcSnapshot_t rtc;
+        int32_t people;
 
-        /* 先把这 5 秒内的 IN/OUT 事件全部写进去 */
-        while (xLogQueue != NULL && xQueueReceive(xLogQueue, &item, 0) == pdTRUE)
+        RTC_GetCachedTime(&rtc);
+        if (osMutexAcquire(peopleMutexHandle, osWaitForever) == osOK)
         {
-          const char *etype = (item.event == EVENT_IN) ? "IN" :
-                              (item.event == EVENT_OUT) ? "OUT" : "DENIED";
-          sprintf(line, "20%02d-%02d-%02d %02d:%02d:%02d, %s, People=%d\r\n",
-                  item.year, item.month, item.date,
-                  item.hour, item.min, item.sec,
-                  etype, item.people);
-          f_write(&USERFile, line, strlen(line), &bw);
+          people = current_people;
+          (void)osMutexRelease(peopleMutexHandle);
+        }
+        else
+        {
+          people = 0;
+        }
+        result = f_open(&USERFile, "boot.txt", FA_OPEN_ALWAYS | FA_WRITE);
+        if (result == FR_OK)
+        {
+          (void)f_lseek(&USERFile, f_size(&USERFile));
+          line_length = FormatLogLine(line, &rtc, "BOOT", people);
+          result = f_write(&USERFile, line, line_length, &bytes_written);
+          if (result == FR_OK)
+          {
+            result = f_sync(&USERFile);
+          }
+          (void)f_close(&USERFile);
+          if (result == FR_OK)
+          {
+            boot_recorded = 1U;
+          }
+        }
+      }
+
+      result = f_open(&USERFile, "log.csv", FA_OPEN_ALWAYS | FA_WRITE);
+      if (result == FR_OK)
+      {
+        LogItem_t item;
+        int32_t people;
+        RtcSnapshot_t rtc;
+
+        if (f_size(&USERFile) == 0U)
+        {
+          const char *header = "time,event,people\r\n";
+          result = f_write(&USERFile, header, strlen(header), &bytes_written);
+        }
+        if (result == FR_OK)
+        {
+          result = f_lseek(&USERFile, f_size(&USERFile));
         }
 
-        /* 再每 5 秒固定记录一次当前状态，便于确认 TF 卡确实在工作 */
-        osMutexWait(peopleMutexHandle, osWaitForever);
-        people_copy = current_people;
-        osMutexRelease(peopleMutexHandle);
+        while ((result == FR_OK) && (LogBuffer_Pop(&item) != 0U))
+        {
+          const char *event_text = (item.event == EVENT_IN) ? "IN" :
+                                   (item.event == EVENT_OUT) ? "OUT" : "DENIED";
+          RtcSnapshot_t item_time;
 
-        sprintf(line, "20%02d-%02d-%02d %02d:%02d:%02d, STAT, People=%d\r\n",
-                rtc_year, rtc_month, rtc_date,
-                rtc_hour, rtc_min, rtc_sec,
-                people_copy);
-        f_write(&USERFile, line, strlen(line), &bw);
+          item_time.year = item.year;
+          item_time.month = item.month;
+          item_time.date = item.date;
+          item_time.hour = item.hour;
+          item_time.minute = item.minute;
+          item_time.second = item.second;
+          line_length = FormatLogLine(line, &item_time, event_text, item.people);
+          result = f_write(&USERFile, line, line_length, &bytes_written);
+        }
 
-        /* 立即同步到卡里，避免断电或拔卡时数据还在缓存里 */
-        f_sync(&USERFile);
-        f_close(&USERFile);
+        if ((result == FR_OK) &&
+            (osMutexAcquire(peopleMutexHandle, osWaitForever) == osOK))
+        {
+          people = current_people;
+          (void)osMutexRelease(peopleMutexHandle);
+          RTC_GetCachedTime(&rtc);
+          line_length = FormatLogLine(line, &rtc, "STAT", people);
+          result = f_write(&USERFile, line, line_length, &bytes_written);
+        }
+
+        if (result == FR_OK)
+        {
+          (void)f_sync(&USERFile);
+        }
+        (void)f_close(&USERFile);
       }
     }
+
+    /* With no TF module present this task simply retries every five seconds. */
+    osDelay(TF_RETRY_PERIOD_MS);
   }
+#endif
   /* USER CODE END StartTFCardTask */
+}
+
+/**
+  * @brief  Period elapsed callback in non blocking mode
+  * @note   This function is called  when TIM1 interrupt took place, inside
+  * HAL_TIM_IRQHandler(). It makes a direct call to HAL_IncTick() to increment
+  * a global variable "uwTick" used as application time base.
+  * @param  htim : TIM handle
+  * @retval None
+  */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  /* USER CODE BEGIN Callback 0 */
+
+  /* USER CODE END Callback 0 */
+  if (htim->Instance == TIM1)
+  {
+    HAL_IncTick();
+  }
+  /* USER CODE BEGIN Callback 1 */
+
+  /* USER CODE END Callback 1 */
 }
 
 /**
@@ -896,8 +1292,7 @@ void Error_Handler(void)
   }
   /* USER CODE END Error_Handler_Debug */
 }
-
-#ifdef  USE_FULL_ASSERT
+#ifdef USE_FULL_ASSERT
 /**
   * @brief  Reports the name of the source file and the source line number
   *         where the assert_param error has occurred.
