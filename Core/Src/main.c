@@ -841,7 +841,7 @@ static void Display_Refresh(void)
   OLED_Clear();
   people_line[8] = (char)('0' + (people % 10));
   people_line[10] = (char)('0' + MAX_PEOPLE);
-  OLED_ShowString(7U, 0U, people_line);
+  OLED_ShowString(9U, 0U, people_line);
 
   (void)Text_AppendTwoDigits(&time_line[0], rtc.hour);
   time_line[2] = ':';
@@ -849,7 +849,7 @@ static void Display_Refresh(void)
   time_line[5] = ':';
   (void)Text_AppendTwoDigits(&time_line[6], rtc.second);
   time_line[8] = '\0';
-  OLED_ShowString2x(16U, 30U, time_line);
+  OLED_ShowString2x(18U, 30U, time_line);
   OLED_Refresh();
 }
 
